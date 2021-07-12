@@ -1,0 +1,178 @@
+---
+title: "Data Mining II Case 1"
+author: "Laith Barakat"
+date: "3/10/2020"
+output: 
+  word_document:
+    toc: yes
+---
+
+# Executive summary
+
+## Goal and Background
+
+This case analyzes the Boston Housing data that is publicly available within the `R` package `MASS`. I intend to explore different methods of advanced tree models to predict the median home value in Boston based on the variables given in the dataset. 
+
+## Approach
+
+Some of the models used in this report include a conventional linear model, a regression tree, a bagging model, a random forest model, and a boosting tree. These models were each, in order, developed and tested with the in-sample fits to determine model performance. These values were compared across all models. Subsequently, out-of-sample performances were then measured and compared. 
+
+## Major findings
+
+It can be observed that the performance both in-sample and out-of-sample decreases drastically between the linear model, the single tree model, and the more advanced models. Using a more advanced tree is absolutely preferable when aiming to reduce out-of-sample performance. The quantitative results are below within the `Report` section. 
+
+
+
+# Report
+
+To begin, all of the required packages need to be loaded into R. I also set a seed that will ensure replication of work for random sampling.
+
+```{r warning=FALSE, message=FALSE}
+#LOADING Packages
+library(MASS)
+library(randomForest)
+library(rpart)
+library(gbm)
+set.seed(08790430)
+```
+
+Next, we can load the Boston data and create our training sample of data and our testing sample of data.
+
+```{r}
+#loading the data 
+data(Boston)
+index <- sample(nrow(Boston),nrow(Boston)*0.70)
+boston.train <- Boston[index,]
+boston.test <- Boston[-index,]
+```
+
+For initial comparison, we will build a basic linear regression using all of the variables of the dataset. Since extensive work has been done related to linear regression in previous courses, this will only serve as a baseline to test in-sample and out-of-sample performance against all of the regression trees, and no cross-validation or variable selection will be performed. The focus of this report is on the tree models.
+
+```{r}
+#initial linear regression
+boston.lm <- lm(medv~., data = boston.train)
+summary(boston.lm)$call
+lm_mse_in <- summary(boston.lm)$sigma^2
+```
+
+Now, the tree model development can begin. Bagging is the process of bootstrapping for prediction accuracy on model development. Therefore, each bootstrap sample is given a fitted tree, and the results are aggregated. `randomForest()` gives an appropriate formula for bagging when the proper arguments are specified. 
+
+```{r}
+#bagging
+boston.bag <- randomForest(medv~., data=boston.train, ntree=100, mtry=ncol(boston.train)-1)
+boston.bag
+(bag_mse_in <- boston.bag$mse[100])
+```
+
+We can see that from this bagging process, when specifying the number of trees at 100, we get an in-sample MSE of around 15. How does this compare to developing a single tree?
+
+```{r}
+#compare to a single tree
+boston.tree <- rpart(medv~., data = boston.train)
+tree.mse.in <- mean((predict(boston.tree)-boston.train$medv)^2)
+boston.tree.pred <- predict(boston.tree, newdata=boston.test)
+tree.mse.out <- mean((boston.test$medv-boston.tree.pred)^2)
+
+```
+
+This begs the question of how many trees are actually required within a bagging process. The below shows how we can pinpoint the proper number of trees needed. 
+
+```{r}
+#how many trees are needed
+ntree <- c(1, 3, 5, seq(10,200,10))
+MSE.test <- (rep(0, length(ntree)))
+for(i in 1:length(ntree)){
+  boston.bag <- randomForest(medv~., data=boston.train, ntree=ntree[i], mtry=ncol(boston.train)-1)
+  boston.bag.pred <- predict(boston.bag, newdata = boston.test)
+  MSE.test[i] <- mean((boston.test$medv-boston.bag.pred)^2)
+}
+plot(ntree, MSE.test, type = 'l')
+
+```
+
+Based on the plot, it looks like once we hit 20 trees, there is a minimal marginal return for each additional tree we add to the bagging model.
+
+```{r}
+#out of bag performance
+boston.bag$mse[100]
+```
+
+The next tree model we examine is a random forest. This is an extension of the bagging method, but in a situation where random predictor variables are selected to decorrelate the trees, thus reducing aggregation variance of the trees overall. The generation of the random forests is below. We divide the number of total predictors by 3 (generally) to select the number of predictors to build each tree off of:
+
+```{r}
+#random forest generation
+boston.rf <- randomForest(medv~., data = boston.train, mtry = floor(ncol(boston.train)-1)/3, ntree = 500, importance = TRUE)
+boston.rf
+boston.rf$importance
+plot(boston.rf$mse, type='l', col=2, lwd=2, xlab = "ntree", ylab = "OOB Error")
+(rf.mse.in <- boston.rf$mse[500])
+
+```
+
+Variable importance is a way of determining which variables are most important to the MSE reduction. We also plot the MSR (MSE out of bag) as the number of trees we calculate inceases. 
+
+We can observe how the number of predictors that we use 
+
+```{r}
+#oob error testing 
+oob.err<- rep(0, 13)
+test.err<- rep(0, 13)
+for(i in 1:13){
+  fit<- randomForest(medv~., data = boston.train, mtry=i)
+  oob.err[i]<- fit$mse[500]
+  test.err[i]<- mean((boston.test$medv-predict(fit, boston.test))^2)
+  cat(i, " ")
+}
+matplot(cbind(test.err, oob.err), pch=15, col = c("red", "blue"), type = "b", ylab = "MSE", xlab = "mtry")
+legend("topright", legend = c("test Error", "OOB Error"), pch = 15, col = c("red", "blue"))
+rf.mse.in.mtry <- oob.err
+```
+
+Finally, we can create a boosted tree, which limits the number of trees created, but uses the residual from the previous tree created to attempt to optimize the performance.
+
+```{r}
+boston.boost <- gbm(medv~., data = boston.train, distribution = "gaussian", n.trees = 10000, shrinkage = 0.01, interaction.depth = 8)
+boost.mse.in <- mean((boston.boost$fit - boston.train$medv)^2)
+```
+
+# Final Results
+
+From all of these models, we can calculate the in-sample MSE and out-of-sample MSE as a result. First, the in-sample MSE:
+
+```{r echo = FALSE}
+in_sample_table <- matrix(data = c("linear MSE", "tree MSE", "bagging MSE", "random forest MSE", "boosted MSE", 
+                             lm_mse_in,
+                             tree.mse.in,
+                             bag_mse_in,
+                             rf.mse.in,
+                             boost.mse.in), ncol = 2, nrow = 5)
+in_sample_table
+```
+
+Now, the out-of-sample MSE:
+
+```{r echo = FALSE}
+lm_mse_out <- mean((predict(boston.lm, newdata = boston.test) - boston.test$medv)^2)
+
+boston.bag.pred <- predict(boston.bag, newdata = boston.test)
+bag_mse_out <- mean((boston.test$medv-boston.bag.pred)^2)
+
+boston.tree.pred <- predict(boston.tree, newdata=boston.test)
+tree.mse.out <- mean((boston.test$medv-boston.tree.pred)^2)
+
+boston.rf.pred<- predict(boston.rf, boston.test)
+rf.mse.out <- mean((boston.test$medv-boston.rf.pred)^2)
+
+boston.boost.pred.test <- predict(boston.boost, boston.test, n.trees = 10000)
+boost.mse.out <- mean((boston.test$medv-boston.boost.pred.test)^2)
+
+output_table <- matrix(data = c("linear MSE", "tree MSE", "bagging MSE", "random forest MSE", "boosted MSE", 
+                             lm_mse_out,
+                             tree.mse.out,
+                             bag_mse_out,
+                             rf.mse.out,
+                             boost.mse.out), ncol = 2, nrow = 5)
+output_table
+```
+
+It can be observed that the performance both in-sample and out-of-sample decreases drastically between the linear model, the single tree model, and the more advanced models. Using a more advanced tree is absolutely preferable when aiming to reduce out-of-sample performance.  

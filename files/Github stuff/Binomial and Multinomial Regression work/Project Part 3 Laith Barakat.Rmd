@@ -1,0 +1,211 @@
+---
+title: "Laith Barakat 7042 Project Part 3"
+author: "Laith Barakat"
+date: "March 1, 2020"
+output: word_document
+---
+
+##Go to page 6 to skip the data cleaning steps. 
+
+##Re-cleaning the data
+
+###Step 1
+
+Read in the files and load relevant libraries
+
+```{r warning=FALSE, message=FALSE}
+library(readxl)
+library(tidyverse)
+setwd('C:/Users/Laith/Documents/SpringSem20/Stat Modeling')
+FAA1 <- read_xls('FAA1-1.xls')
+FAA2 <- read_xls('FAA2-1.xls')
+```
+
+
+###Step 2
+
+Check structure
+
+```{r}
+str(FAA1)
+str(FAA2)
+```
+
+The data set FAA1 has 800 observations and 8 columns. The dataset FAA2 has 150 variables and 7 columns. FAA1 has all of the same fields as FAA2 with the addition of duration. 
+
+###Step 3
+
+Merging datasets
+
+```{r}
+FAAm <- full_join(FAA1, FAA2)
+distinct(FAAm)
+
+```
+
+There were duplicates; this is covered by the `distinct()` function in R and will be eliminated.
+
+###Step 4
+
+Structure of combined dataset and summary statistics
+
+```{r}
+str(FAAm)
+glimpse(FAAm)
+summary(FAAm)
+```
+
+###Step 5
+
+Insights:
+
+* After I remove duplicates in the dataset and merge together, I have a sample size of 850 flights that will provide a statistically significant sample for our analysis.
+
+* The 642 NA values in the column for air speed imply that the column may be difficult to find significant.
+
+* The minimum value for duration, 14.76, is an outlier that we will have to eliminate.
+
+* There are upper and lower ground speed outliers within that variable. 
+
+* There is a negative value in the height variable. This is an outlier as well. 
+
+##Data Cleaning and Further exploration
+
+###Step 6
+
+Abnormal values
+
+```{r}
+sum(FAAm$duration < 40,na.rm = TRUE)
+sum(FAAm$speed_ground < 30, na.rm = TRUE)
+sum(FAAm$speed_ground > 140, na.rm = TRUE)
+sum(FAAm$speed_air < 30, na.rm = TRUE)
+sum(FAAm$speed_air > 140, na.rm = TRUE)
+sum(FAAm$height < 6, na.rm = TRUE)
+
+FAAmc <- FAAm %>% 
+  filter(
+    duration > 40 | is.na(duration),
+    speed_ground > 30 & speed_ground < 140 | is.na(speed_ground),
+    speed_air > 30 & speed_air < 140| is.na(speed_air),
+    height > 6 | is.na(height)
+  )
+
+nrow(FAAm) - nrow(FAAmc)
+```
+
+I ended up removing about 20 rows. 
+
+###Step 7
+
+Repeating step 4
+
+```{r}
+str(FAAmc)
+glimpse(FAAmc)
+summary(FAAmc)
+```
+
+###Step 8 
+
+Histograms of each variable
+
+```{r}
+par(mfrow = c(2,4))
+hist(FAAmc$duration)
+hist(FAAmc$no_pasg)
+hist(FAAmc$speed_ground)
+hist(FAAmc$speed_air)
+hist(FAAmc$height)
+hist(FAAmc$pitch)
+hist(FAAmc$distance)
+
+```
+
+Many of these look to be quite normally distributed.
+
+###Step 9
+
+* Each of the numeric variables, when cleaned and visualized, look normally distributed or relatively normally distributed.
+
+* All values are within the data dictionary's parameters and include 832 observations of data.
+
+* I kept the observations where distance > 6000 because that variable is the response variable.
+
+##Question 1: using a multinomial response variable
+
+We are working under the pretense that we do not know the actual values for distance; we instead will initialize a multinomial variable with the values as Y = 1 if distance is below 1000, Y = 2 if distance is between 1000 and 2500, and Y = 3 otherwise. The variable is initialized and validated in the following chunk of code:
+
+```{r}
+FAA <- FAAmc
+head(FAA)
+
+FAA$disty <- if_else(FAA$distance < 2500, if_else(FAA$distance < 1000, 1,2),3)
+FAA[1:10, c("disty", "distance")]
+
+```
+
+The count values of this variable are visualized below:
+
+```{r}
+barplot(table(FAA$disty))
+```
+
+We hope to examine a model that predicts this multinomial variable using our predictor variables from the dataset. 
+
+```{r}
+library(nnet)        
+mmod<-multinom(disty~speed_ground + height + aircraft + no_pasg + pitch,FAA)
+summary(mmod)
+
+```
+
+We will want to test the significance of each of these coefficients. The significance tests are calculated below:
+
+```{r}
+zval <- summary(mmod)$coefficients/summary(mmod)$standard.errors
+p <- (1 - pnorm(abs(zval), 0, 1)) * 2
+p
+```
+
+We ought to conduct variable selection by AIC values to hopefully get better news:
+
+```{r}
+mmodi <- step(mmod)
+summary(mmodi)
+zval <- summary(mmodi)$coefficients/summary(mmodi)$standard.errors
+p <- (1 - pnorm(abs(zval), 0, 1)) * 2
+p
+```
+
+In both models, we conduct Wald tests to find variable significance; we interpret the final values for p-value that are 0 to be significant, since the z-scores are so large. Therefore, our significant variables are ground speed, height, and aircraft. 
+
+My findings to the FAA official would be the following:
+
+* There is about a 30% chance of a class 1 distance landing, 55% chance of a class 2 distance landing, and a 15% chance of a class 3 distance landing. Visualized below:
+
+```{r echo=FALSE}
+barplot(table(FAA$disty)/nrow(FAA))
+```
+
+* A best-fit and most accurate model yields us a logistic regression `mmodi` that we can use to predict each class of landing. The variables that we are using are ground speed, height, and aircraft type. `mmodi` is below:
+
+```{r}
+summary(mmodi)
+```
+
+##Question 2: Prediction of passenger count
+
+If we were to explore the idea of predicting the number of passengers on a flight, we would use a Poisson distribution to model the outcomes. This is due to the fact that the data is count data. 
+
+```{r}
+modp<-glm(no_pasg ~ aircraft + duration + speed_ground + speed_air + height + pitch + distance, family=poisson, FAA)
+summary(modp)
+drop1(modp,test="Chisq")
+gof<-sum(residuals(modp,type="pearson")^2)
+pchisq(gof,df.residual(modp),lower=F)
+dp<-gof/modp$df.res
+summary(modp, dispersion = dp)
+```
+
+My analysis above shows that there are no significant variables for the prediction of number of passengers in this dataset, even when attempting to fit a dispersion parameter onto the model. This can be accepted when we realize that the mechanical metrics we were given about flights would not necessarily influence or be influenced by the number of passengers we have. 

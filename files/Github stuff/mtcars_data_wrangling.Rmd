@@ -1,0 +1,591 @@
+---
+title: "Electric Vehicle Product Analysis: Data Wrangling Final Project"
+author: "Laith Barakat & Matt Lekowski"
+date: "December 2, 2019"
+output: html_document
+---
+```{r, echo=FALSE}
+htmltools::img(src = 'https://static.thenounproject.com/png/487299-200.png', 
+               alt = 'icon', 
+               style = 'position:absolute; top:0; right:0; padding:10px;')
+```
+
+```{r, echo=FALSE}
+htmltools::img(src = 'https://i.ibb.co/7bFFGGT/ibiza-matt-laith.jpg', 
+               alt = 'iconic', 
+               style = 'position:absolute; top:0; left:0; padding:15px;',
+               length = 200,
+               width = 200)
+```
+
+---
+
+# {.tabset}
+
+## INTRODUCTION 
+
+We decided to analyze the `mtcars` dataset to determine whether or not the ranges and charge times of electric vehicles has been increasing over time as technology improves. We would also like to determine whether or not Tesla vehicles have longer ranges than other makes of electric cars, and if re-focusing the analysis to either all-wheel drive or two-wheel drive vehicles would have any effect. Because Tesla makes up the largest proportion of our datapoints, we would also like to see if there is signicant variance between its own different models of electric cars. 
+
+To solve these problems we will use scatter plots and histograms to plot the ranges of the different electric vehicles against make, Tesla model, year, and other variables. We will also create new variables to categorize our data effectively.
+
+We will also plot several scatter plots with color coded points to help us compare three different variables at once. We will also choose to conduct hypothesis tests comparing means of different samples within the EV space - for example, comparing the mean charge time / range of Tesla vehicles to the the mean of all other models to a certain confidence level.
+
+Our analysis will help the consumer determine which electric cars have the longest overall, city and highway ranges, and if this depends on make or class of car. It will also help them determine whether a new car is needed to maximize their range, and what, if anything may be sacrificed in order to achieve maximum range. Electric cars with long ranges and fast charge times are extremely desirable to consumers, as it can be a major inconvenience to them if they expectedly run out of charge or are forced to reroute in order to find a charging station. 
+
+
+## PACKAGES 
+```{r Libraries, error=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(data.table)
+library(knitr)
+```
+
+We require the **data.table** and **tidyverse** packages for our analyses. From the **dplyr** package within the **tidyverse** we use the `select` and `mutate` functions to remove columns that are not relevant and create new variables that analyze relationships between existing variables, as well as `filter`, `group_by`, `summarise`, `arrange`, and others to build basic summary statistics for our data. Alongside this, we utlize many `ggplot` functions from the **ggplot** package within **tidyvers**. We use the `fread` function from the **data.table** package to read in our csv data from the url. We use the `kable` function from the **knitr** package to format some tables.
+
+
+## DATA PREP {.tabset}
+
+### 1. Intro & Import
+The `mtcars` dataset comes from the EPA and the U.S. Department of Energy's Office of Energy Efficiency & Renewable Energy. It was last updated November 15th, 2019. This dataset includes vehicle, emission, and fuel price data and we believe it may have been collected to raise awareness about air pollution caused by cars, and provide insights into how certain vehicles are better than others at using clean energy and consuming less fuel. In a time where global warming and our carbon footprints are popular topics of discussion and frequently mentioned on the news, this dataset can be used as a tool for people who are concerned with emissions and their carbon footprints to decide which types of cars they may be open to buying.
+
+Our first step into the data prep is to load the data through the url recieved from [a GitHub user's page](https://github.com/rfordatascience/tidytuesday/tree/master/data/2019/2019-10-15) (original source is [FuelEconomy.gov](https://www.fueleconomy.gov/feg/ws/index.shtml#emissions)) and using the `fread` function: 
+
+```{r Import, results = 'hide'}
+##loading data into RStudio and checking for success
+url <- 'https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-10-15/big_epa_cars.csv'
+cars <- fread(url)
+head(cars)
+```
+
+### 2. First Glance
+
+When looking at the data upon load, we want to see how big the dataset is and basic understanding about the format and structure of the set:
+
+```{r PrelimData, results='hide'} 
+#how big is the dataset? introductory questions about data
+names(cars)
+summary(cars)
+str(cars)
+
+```
+```{r}
+dim(cars)
+```
+
+This dataset is massive. We have over 40,000 observations and 83 variables. This is rather unmanageable in its current form. We hope to trim this to only relevant data prior to further data cleaning steps. 
+
+### 3. Filtering for Electric Vehicles
+
+Knowing that we want to do an analysis on electric vehicles (EVs), it is important to us to firstly trim the dataset to only include electric vehicle observations. After taking an initial look at the `cars` dataset and consulting the [data dictionary](https://www.fueleconomy.gov/feg/ws/index.shtml#emissions), we determined that an easy way to identify electric vehicle observations was through the `atvType` column:
+```{r CarType}
+kable(table(cars$atvType), col.names = c('Vehicle Type','Frequency'))
+```
+
+
+```{r FilterEVs, results = 'hide'}
+##Filter on EVs = only showing where atvType = 'EV' to limit our set
+EVcars <- cars[cars$atvType == "EV",]
+head(EVcars)
+```
+
+```{r CheckDim}
+dim(EVcars)
+```
+
+We filter out all non-electric cars are left with an `EVcars` dataset that contains 209 observations with all 83 original columns. 
+
+### 4. Trimming Variables with Missing Values
+
+We know we need to continue organizing the data to only include relevant columns. We start by looking at columns with all or many missing values inside the variable. We also imagine that there are certain columns that are irrelevant to EVs, and we want to target those first as well. 
+
+```{r NullChecking}
+missingvalues <- colnames(EVcars)[colSums(is.na(EVcars)) > 0]
+nullTable <- select(EVcars, missingvalues)
+kable(head(nullTable))
+dim(nullTable)
+nullPropBarplot <- barplot(colSums(is.na(nullTable))/nrow(nullTable), las = 2, ylim = c(0,1))
+```
+```{r results="hide"}
+nullPropBarplot
+```
+
+Using the `select` function to target missing values, we create a barplot that shows the proportions of missing values for all of the variables that have at least one missing value. It is evident that there are several variables that have no values, which we can immediately mark for elimination. 
+
+```{r ValueChecks, results = "hide"}
+#view the different values and their frequencies for the variables we are unsure of whether to keep or not
+
+table(EVcars$c240bDscr)
+table(EVcars$mfrCode)
+table(EVcars$displ)
+table(EVcars$trany)
+table(EVcars$evMotor)
+
+```
+
+```{r ValueChecks2}
+kable(table(EVcars$eng_dscr), col.names = c('Engine Type', 'Frequency'))
+kable(table(EVcars$c240Dscr), col.names = c('Charger Type', 'Frequency'))
+```
+
+```{r TrimDown, results="hide"}
+##Deselect the variables we do not want to include based on their proportions of missing values shown in the barplot
+EVcars_trim1 <- select(.data = EVcars, -c(cylinders, displ, eng_dscr, guzzler, trans_dscr, tCharger, sCharger, fuelType2, rangeA, mfrCode))
+head(EVcars_trim1)
+```
+
+```{r CheckTrimDown}
+dim(EVcars_trim1)
+```
+
+For the remaining 7 variables we use the `table` function to get an idea for how many values they have and what the frequencies are. We decide to keep the c240Dscr and c240bDscr variables despite their missing values, as they still have enough data to be useful to us if we decide to include electric vehicle charging in our analysis. We also keep the variables drive, trany, and evMotor because they still have values for a majority of the observations and may be useful in our investigation into ranges of electric vehicles. We cut mfrCode because we already have the variable make and do not feel this will add incremental value. We also cut eng_desc and displ because they have missing values for such a large proportion of their observations without adding much important insight with the values that are included.
+
+We use the select function again to deselect all the variables we decided to remove, generating a new dataset called `EVcars_trim1`. We now have 209 observations in 73 columns.
+
+### 5. Trimming Irrelevant Variables
+
+```{r TrimDown2, results = "hide"}
+##First pass on variable stripping - taking out non-relevant fields 
+relevantvars <- c('atvType', 'c240Dscr', 'c240bDscr',
+                  'charge120', 'charge240', 
+                  'cityE', 'cityUF', 'combE', 
+                  'combinedUF', 'drive', 
+                  'evMotor', 'engId', 'feScore', 
+                  'fuelCost08', 'fuelCostA08', 'fuelType',
+                  'fuelType1', 'ghgScore', 
+                  'ghgScoreA', 'highway08', 'highway08U', 
+                  'highwayA08U', 'highwayE', 'id', 
+                  'make', 'model', 'mpgData', 'range', 'rangeCity', 
+                  'rangeHwy', 'trany', 'UCity','UHighway', 
+                  'VClass', 'youSaveSpend', 'charge240b', 'year')
+EVcars_trim2 <- select(.data = EVcars, relevantvars)
+head(EVcars_trim2)
+```
+```{r CheckTrimDown2}
+dim(EVcars_trim2)
+```
+
+Once we've filtered out the variables that have too many missing values to be useful to our analyses, we look into the data dictionary to interpret the descriptions of each of the remaining variables and determine which will be relevant to our investigation into electric vehicles. We are able to remove 36 variables that pertain to gasoline, engines, and other things that are only applicable to non-electric vehicles, or are otherwise irrelevant to our analysis, leaving us with 209 observations across 37 variables.
+
+### 6. Trimming Variables with no Variance
+
+
+```{r TrimDown3, results = "hide"}
+#getting rid of variables with only 1 value
+EVcars_trim3 <- Filter(function(x)(length(unique(x))>1), EVcars_trim2)
+head(EVcars_trim3)
+```
+```{r CheckTrimDown3}
+dim(EVcars_trim3)
+```
+
+Now that we have only variables that we believe to be relevant to our analyses and are not missing values for a substantial amount of observations, we decide to use the `filter` function to remove variables that only have one value across all observations. If there is no variance in the variable then it is not helpful to us in our analysis. This leaves us with 209 observations across 28 variables.
+
+
+### 7. Recoding of Similar Variables
+
+```{r TrimDown4}
+#recoding similar values to simplify streamline analysis related to class of car
+EVcars_trim4 <- EVcars_trim3
+kable(table(EVcars_trim4$VClass), col.names = c('Class', 'Frequency'))
+EVcars_trim4$VClass[EVcars_trim4$VClass == "Small Station Wagons"] <- "Station Wagons"
+EVcars_trim4$VClass[EVcars_trim4$VClass == "Midsize Station Wagons"] <- "Station Wagons"
+EVcars_trim4$VClass[EVcars_trim4$VClass == "Standard Pickup Trucks 2WD"] <- "Pickup Trucks"
+EVcars_trim4$VClass[EVcars_trim4$VClass == "Small Pickup Trucks 2WD"] <- "Pickup Trucks"
+```
+
+Our final step in our data preparation and cleaning processes is to combine data values that are similar to one another to streamline our analyses. It will be much easier to compare values between different classes of cars if we have them consolidated into a few major classes instead of many smaller subclasses, especially when many of them have little to no differences from one another.
+
+### 8. Overview of Final Dataset
+
+```{r CheckTrimDown4AndFinalize }
+#get summary information about the final dataset
+str(EVcars_trim4)
+
+#using EVcars label for our final working dataset
+EVcarsTrim <- EVcars_trim4
+
+```
+```{r}
+kable(head(EVcarsTrim))
+```
+
+
+We use the `str` function to show a summary information about our data, including the number of variables and observations, the class types, variable names, and the first few values for each of the variables. Then we use the `kable` and `head` functions to display a portion of our data in a cleaned and condensed format.
+
+Our final dataset for use moving forward is a set with 209 observations and 28 variables. There are  variables that help us identify descriptive information of each vehicle, such as `year` for the model year, `make` and `model` for the maker and the model name, `VClass` for vehicle class that shows type of vehicle, `drive` distinguishing the type of drivetrain, and `evMotor` describing special aspects of some of the motors used for the EVs. Most of the rest of the variables are metrics that determine performance. Variables of note here include `cityE` and `hwyE`, which denote city and highway electricity consumption in kw-hrs/100 miles for each vehicle respectively; `range`, denoting EPA range of vehicle; and `charge240`, which is time to charge an electric vehicle in hours at 240 V. While these are our primary variables of interest, the other variables may prove to be interesting to explore as we make our way through data analysis, and thus we are keeping them in.  
+
+
+## EXPLORATORY DATA ANALYSIS {.tabset}
+
+### Range and Charge Time by Year
+
+Our primary interest lies within both the `range` and `charge240` variables. We'll start by looking at `range` and `charge240` over time; we are interested first in seeing if there have been significant technological improvements over time as the prevalence of EV research and development has grown in recent years. 
+
+```{r echo=FALSE}
+
+#scatter plotting range and charge time over year 
+EVcarsTrim %>% 
+  ggplot(aes(year, range)) + 
+  geom_point() + 
+  scale_y_continuous(name = "range (miles)") +
+  ggtitle("Range vs. Model Year")
+
+EVcarsTrim %>% 
+  ggplot(aes(year, charge240)) + 
+  geom_point() + 
+  scale_y_continuous(name = "charge time (hours") +
+  ggtitle("Charge Time vs. Model Year")
+
+```
+
+Record-high range has certainly improved over the past 20 years - however, there are still many models with ranges that are similar to older models. There is a serious gap in data between the years 2005 and 2010. Given the history of the EV industry and that true prototyping and feasible models did not gain traction until 2010, we may elect to only take into account records with `year > 2010` in future analysis. 
+
+We also can see that there are fewer recorded values for charge time, which may play a role in future hypothesis tests. Values for charge time vary in recent years between 3 and 13 hours.
+
+### Vehicle Class
+
+We'd like to explore the `VClass` variable more; to start, we simply want to see a breakdown of each vehicle class. We can use a standard barplot to display this:
+
+```{r echo=FALSE}
+EVcarsTrim %>% 
+  mutate(VClass = fct_relevel(VClass)) %>% 
+  ggplot(aes(x = VClass)) + 
+  geom_bar()+ 
+  theme(axis.text.x = element_text(angle = 90, vjust = .5, hjust = .1)) +   labs(title = "Vehicle Class Breakdown")
+
+kable(table(EVcarsTrim$VClass), col.names = c("Vehicle Class", "Frequency"))
+
+```
+
+Our greatest two samples are in large and midsize cars for vehicle class. We may want to only compare between classes in those two cagetories, as they appear to be the only two with more than 30 observations.
+
+### Make
+
+We can also look at the breakdown of `make` to see which specific car makers we can compare to each other:
+
+```{r echo=FALSE}
+EVcarsTrim %>% 
+  ggplot(aes(x = make)) + 
+  geom_bar() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = .5, hjust = .1)) +
+  ggtitle("Breakdown of Vehicle Maker")
+
+```
+
+Tesla observations far outweigh any other make. Based on this, we will limit most of our `make` comparisons to Tesla vs. non-Tesla analyses; however, Nissan, Ford, and smart all have numerous observations as well, so we can also highlight those as well. 
+
+### Initial Tesla comparisons on range and charge time
+
+We could make some initial analysis based on our first visualizations and including `make`. We want to add a column that color codes for notable makes that we specified earlier - all other makes will be shown as black.
+
+```{r}
+#Adding color classifications for specific makes
+EVcarsTrim$color = 'black'
+EVcarsTrim$color[EVcarsTrim$make == 'Tesla']='red'
+EVcarsTrim$color[EVcarsTrim$make == 'Nissan']='blue'
+EVcarsTrim$color[EVcarsTrim$make == 'Ford']='green'
+EVcarsTrim$color[EVcarsTrim$make == 'smart']='orange'
+
+#plotting based on color
+EVcarsTrim %>% 
+  ggplot(aes(x = year, y = range, color = make)) +
+  geom_point() + 
+  ggtitle("Range by year, by make")
+
+```
+
+Tesla can easily be seen to have a higher range than other vehicles in recent years. Is there a tradeoff with charge time, though? 
+
+```{r}
+#charge time by year by make
+EVcarsTrim %>% 
+  ggplot(aes(x = year, y = charge240, color = make)) +
+  geom_point() + 
+  ggtitle("Charge Time by year, by make")
+
+```
+
+This looks to be the case. We would like to investigate this more, and we may elect to build a metric to standardize this relationship or potentially to model it with a linear regression.
+
+### Basic summary statistics
+
+Now that we have begun to visualize the data, we can investigate some of the variables more deeply. Using `dplyr` functions and our insights from previous steps in EDA, we will begin to summarise certain variables.
+
+```{r}
+#summarizing mean range by make
+EVcarsTrim %>% 
+  filter(year > 2010) %>% 
+  group_by(make) %>% 
+  summarise(meanRange = mean(range, na.rm = TRUE), n = n()) %>% 
+  arrange(desc(meanRange)) %>% 
+  kable()
+```
+
+There is very clearly a pecking order for average range, with Tesla at the top. What is the difference between Tesla's average and the average of all of the rest combined, since the n values show such a stark contrast? We can use a `mutate` function to easily find out by making an indicator column for Teslas:
+
+```{r}
+#summarizing mean range by Tesla vs. non-Tesla
+EVcarsTrim %>% 
+  filter(year > 2010) %>% 
+  mutate(teslaBin = if_else(make =='Tesla', 'Tesla', 'non-Tesla')) %>% 
+  group_by(teslaBin) %>% 
+  summarise(meanRange = mean(range, na.rm = TRUE), n = n()) %>% 
+  arrange(desc(meanRange)) %>% 
+  kable()
+```
+
+We want to hypothesize test this difference in mean to determine its significance across these two populations. We will do so in the next section.
+
+Another summarization we can make is the range based on drivetrain. The results are below:
+
+```{r}
+#summarizing mean range by drive type
+EVcarsTrim %>% 
+  filter(year > 2010) %>% 
+  group_by(drive) %>% 
+  summarise(meanRange = mean(range, na.rm = TRUE), n = n()) %>% 
+  arrange(desc(meanRange)) %>% 
+  kable()
+
+```
+
+We will want to compare these population means to a significance level as well. 
+
+## STATISTICAL ANALYSIS { .tabset}
+
+### Tesla vs Non-Tesla Ranges
+
+We decide to do a "difference between two population means" hypothesis test to determine if there is a significant difference between the mean ranges of Tesla and non-Tesla electric vehicles. The population variances are unknown, and for this type of test we will assume they are equal. We use several functions within the `dplyr` package to select only vehicles built after 2010, and classify our vehicles based on whether or not they were manufactured by Tesla. We make a datatable to summarize the primary summary statistics for both Teslas and non-Teslas that we will need for further analysis. Our null hypothesis will be that there is no significant difference between the population means for ranges of Tesla and non-Tesla vehicles; our alternative hypothesis is that there is a significant difference between those two population means.
+
+$$H_0: \mu_1-\mu_2 = 0$$
+$$H_A: \mu_1-\mu_2 \neq 0$$
+
+```{r echo = FALSE}
+#Generating table with summary statistics for our Tesla and non-Tesla samples
+stattable <-   EVcarsTrim %>% 
+                  filter(year > 2010) %>% 
+                  mutate(teslaBin = if_else(make =='Tesla', 'Tesla', 'non-Tesla')) %>% 
+                  group_by(teslaBin) %>% 
+                  summarise(Mean_Range = mean(range, na.rm = TRUE), SD_Range = sd(range, na.rm = TRUE), Sample_Size = n())
+kable(stattable)
+
+```
+
+  
+  
+
+We calculate our pooled variance estimate using the equation below, and use the square root of this value as our estimated standard deviation.
+
+$$s^2_p = \frac{(n_1 - 1) s^2_1 + (n_2 - 1) s^2_2}{n_1 + n_2 - 2}$$
+
+```{r results = 'hide', echo=FALSE}
+#pooled sample estimate
+s2 <- ( ( (stattable$Sample_Size[1] - 1) * stattable$SD_Range[1]^2) + ((stattable$Sample_Size[2] - 1) * stattable$SD_Range[2]^2 ) ) / 
+  (stattable$Sample_Size[1] + stattable$Sample_Size[2] - 2)
+
+s <- sqrt(s2)
+
+```
+
+$$s = `r round(s, 3)`$$
+
+  
+
+We use this calculated estimate in our calculations for the t-statistic, as shown in the below equation. Our t-statistic is 21.761.
+
+$$t = \frac{(\overline{x_1}-\overline{x_2}) - (\mu_1 - \mu_2)}{s_p\sqrt{\frac{1}{n_1}+\frac{1}{n_2}}}$$
+
+```{r echo = FALSE}
+#calculating t-statistic
+t_stat <- (stattable$Mean_Range[2] - stattable$Mean_Range[1] - 0) / (s * sqrt((1 / stattable$Sample_Size[1]) + (1 / stattable$Sample_Size[2])))
+
+```
+$$ t = `r round(t_stat,3)`$$   
+
+  
+
+
+We finalize our hypothesis using the critical value test. We decide to test at a 95% confidence level, and find our critical values at this level of confidence are 1.973 and -1.973. We will reject the null hypothesis if the t-statistic is less than or equal to -1.973, or greater than or equal to 1.973.
+
+```{r echo = FALSE}
+#critical value test at a 95% confidence
+alpha <- .05
+critical_value <- qt(1-(alpha/2), 184)
+```
+
+$$ critical\,values =  \pm `r round(critical_value,3)`$$
+
+Our t-statistic is greater than our larger critical value, so we can reject our null hypothesis. There is sufficient evidence to conclude that the mean range of Tesla cars is not equal to the mean range of non-Tesla cars. From our visualizations it is clear that the Tesla vehicles have a higher mean range than the non-Tesla vehicles.
+
+$$`r round(t_stat,3)`>`r round(critical_value,3)`$$
+
+
+
+
+We then decide to estimate the confidence interval for the difference between the two means using the equation below. We are 95% confident that the difference between the population means in ranges of Tesla and non-Tesla electric vehicles is between 144.68 and 173.32 miles. 
+
+$$\overline{x_1}-\overline{x_2} \pm z*s_p\sqrt{\frac{1}{n_1}+\frac{1}{n_2}}$$
+
+```{r}
+#point estimate
+pt_est <- stattable$Mean_Range[2] -  stattable$Mean_Range[1]
+
+z <- qnorm(1-(alpha/2))
+
+margin <- z * s * sqrt((1 / stattable$Sample_Size[1]) + (1 / stattable$Sample_Size[2]))
+
+#interval estimate
+int_est <- c(pt_est - margin, pt_est + margin)
+
+```
+
+$$Confidence\,Interval: (`r round(int_est,3)`)$$
+
+
+
+
+```{r echo=FALSE}
+#visualize
+EVcarsTrim %>% 
+  filter(year > 2010) %>% 
+  mutate(teslaBin = if_else(make =='Tesla', 'Tesla', 'non-Tesla'),
+         year = as_factor(year)) %>% 
+  ggplot(aes(year, range, color = teslaBin)) +
+  geom_point() + 
+  labs(title = "Elon Musk's favorite graph", subtitle = "Data shows the disparity in range for Tesla EV models against non-Tesla EV models") + 
+  ylab("range (miles)")
+    
+```
+
+
+
+
+### AWD vs 2WD Ranges
+
+Next we decide to do a "difference between two population means" hypothesis test to for all wheel drive and two wheel drive electric vehicles. The population variances are unknown, and for this type of test we will assume they are equal. We use several functions within the `dplyr` package to select only vehicles built after 2010, and classify our vehicles based on their type of drivetrain. We make a datatable to summarize the primary statistics of interest for both all wheel drive and two wheel drive vehicles. Our null hypothesis is that there is no significant difference between the population means for ranges of all wheel drive and two wheel drive electric vehicles; our alternative hypothesis is that there is a significant difference between those two population means.
+
+$$H_0: \mu_1-\mu_2 = 0$$
+
+
+$$H_A: \mu_1-\mu_2 \neq 0$$
+
+
+```{r echo = FALSE}
+#Generating table with summary statistics for our Tesla and non-Tesla samples
+stattable <-   EVcarsTrim %>% 
+  filter(year > 2010) %>% 
+  mutate(driveBin = case_when(drive == 'Rear-Wheel Drive' ~ '2-wheel drive',
+                              drive == 'Front-Wheel Drive' ~ '2-wheel drive',
+                              drive == 'All-Wheel Drive' ~ '4-wheel drive',
+                              TRUE ~ '4-wheel drive'
+                              )) %>% 
+  group_by(driveBin) %>% 
+  summarise(Mean_Range = mean(range, na.rm = TRUE), SD_Range = sd(range, na.rm = TRUE), Sample_Size = n())
+  
+kable(stattable)
+```
+
+
+
+
+We calculate our pooled variance estimate using the equation below, and use the square root of this value as our estimated standard deviation.
+
+$$s^2_p = \frac{(n_1 - 1) s^2_1 + (n_2 - 1) s^2_2}{n_1 + n_2 - 2}$$
+
+```{r results = 'hide', echo=FALSE}
+#pooled sample estimate of variance
+s2 <- ( ( (stattable$Sample_Size[1] - 1) * stattable$SD_Range[1]^2) + ((stattable$Sample_Size[2] - 1) * stattable$SD_Range[2]^2 ) ) / (stattable$Sample_Size[1] + stattable$Sample_Size[2] - 2)
+s <- sqrt(s2)
+```
+
+$$s = `r round(s, 3)`$$
+
+
+
+
+
+We use this calculated estimate in our calculations for the t-statistic, as shown in the below equation. Our t-statistic is -13.676.
+
+$$t = \frac{(\overline{x_1}-\overline{x_2}) - (\mu_1 - \mu_2)}{s_p\sqrt{\frac{1}{n_1}+\frac{1}{n_2}}}$$
+
+```{r echo=FALSE}
+#calculating t-statistic
+t_stat <- (stattable$Mean_Range[1] - stattable$Mean_Range[2] - 0) / (s * sqrt((1 / stattable$Sample_Size[1]) + (1 / stattable$Sample_Size[2])))
+```
+
+$$ t = `r round(t_stat,3)`$$
+
+
+
+
+We finalize our hypothesis using the critical value test. We decide to test at a 95% confidence level, and find our critical values at this level of confidence are 1.973 and -1.973. We will reject the null hypothesis if the t-statistic is less than or equal to -1.973, or greater than or equal to 1.973.
+
+```{r echo= FALSE}
+#critical value test at 95% confidence
+alpha <- .05
+critical_value <- qt(1-(alpha/2), (stattable$Sample_Size[1] + stattable$Sample_Size[2] - 2))
+
+```
+$$ critical\,values =  \pm `r round(critical_value,3)`$$
+
+
+
+
+Our t-statistic is less than than our smaller critical value, so we can reject our null hypothesis. There is sufficient evidence to conclude that the mean range of all wheel drive electric cars is not equal to the mean range of two wheel drive electric cars. From our visualizations it is clear that the all wheel drive electric vehicles have a higher mean range than the two wheel drive vehicles.
+
+$$`r round(t_stat,3)`<`r round(-critical_value,3)`$$
+
+
+
+
+We then decide to estimate the confidence interval for the difference between the two means using the equation below. We are 95% confident that the difference between the population means in ranges of all wheel drive and two wheel drive electric vehicles is between 122.36 and 163.30 miles. 
+
+$$\overline{x_1}-\overline{x_2} \pm z*s_p\sqrt{\frac{1}{n_1}+\frac{1}{n_2}}$$
+
+```{r}
+#point estimate
+pt_est <- stattable$Mean_Range[2] -  stattable$Mean_Range[1]
+
+z <- qnorm((1-alpha)/2)
+
+margin <- z * s * sqrt((1 / stattable$Sample_Size[1]) + (1 / stattable$Sample_Size[2]))
+
+#interval estimate
+int_est <- c(pt_est + margin, pt_est - margin)
+```
+
+$$Confidence\,Interval: (`r round(int_est,3)`)$$
+
+
+
+
+```{r echo=FALSE}
+#visualize
+EVcarsTrim %>% 
+  filter(year > 2010) %>% 
+  mutate(driveBin = case_when(drive == 'Rear-Wheel Drive' ~ '2-wheel drive',
+                              drive == 'Front-Wheel Drive' ~ '2-wheel drive',
+                              drive == 'All-Wheel Drive' ~ '4-wheel drive',
+                              TRUE ~ '4-wheel drive'
+                              ),
+         year = as_factor(year)
+  ) %>% 
+  ggplot(aes(year, range, color = driveBin)) +
+    geom_point() + 
+    labs(title = 'Drivetrain disparity', subtitle = "Difference between drivetrain types in mile range performance as EV model year increases") + 
+    ylab("range (miles)")
+```
+
+
+
+## SUMMARY
+
+As mentioned in our introduction, we analyzed the `mtcars` dataset, and narrowed it down to only electric vehicles. As concerns regarding climate change and talks of our carbon footprint become more prominent, more American consumers choose to drive electric cars to limit their contributions to pollution. Instead of being continually refueled with gasoline, electric cars have a battery which is charged. These cars burn no fossil fuels and are powered by clean energy, but one of their greatest limitations is the range that they are able to drive on a single charge. This is more of an issue for electric vehicles because it can be much harder to find a charging station than a gas station, depending on where you are. This being the case, potential buyers of electric vehicles are extremely concerned with the range that their future vehicle will be able to drive on a single charge, for both convenience and practical reasons. The charge time required to fully charge the electric vehicle is another important variable that can affect the practicality of an electric vehicle.  
+
+We decided to analyze certain attributes of electric cars and determine which other variables seem to have a correlation with the range that these vehicles are able to travel on one charge as well as charge time required. We decided car make, year of production, and drivetrain were three variables that could be significant, so we isolated these variables and plotted them against one another using scatter plots. We also used histograms to determine the frequencies of the different makes and classes of cars. We found that both range and charge time increased as we moved to more recent years of production, and that Tesla vehicles were extremely prominent, representing over one third of the observations. Knowing how prominent Tesla vehicles are, we decide to compare their ranges and charge times to those of the other makes of vehicles. By changing the colors of the points on the scatter plot, we find that Teslas seem to be on the high end for both range and charge time when compared to the other electric vehicle makes. Putting these comparisons into tables confirm our primary findings: the Teslas and all wheel drive cars in our sample have higher mean ranges than their counterparts.  
+
+We decide to use hypothesis tests to decide if our findings can be determined statistically significant based on the sample sizes and variances of the observations in our dataset. In both cases, we reject our null hypothesis and determine that there is significant evidence to say that the mean ranges of the two categories are different.  
+
+The implications to a potential electric car buyer are clear: if you would like your vehicle to have maximum range, you should buy a Tesla vehicle, an all wheel drive vehicle, or both. Teslas consistently have the best ranges and are superior in this aspect, and all wheel drive electric cars tend to have longer ranges than two wheel drive cars.  
+
+Our analysis is limited by the lack of observations for several of the other makes of electric cars that have competitive ranges. Audi, Hyundai, and Jaguar, the next three makes after Tesla when it comes to average range, all have five or fewer observations, compared to Tesla's 77. Having such small amounts of observations could potentially allow an outlier to have a drastic effect on the mean, pulling it down further below Tesla than it should be. We could address this by locating additional data for the electric cars of these manufacturers pulling it into our analysis. Another factor that we realized could be included in our analysis is the relationship between range and charge time. We could create a new variable that is range divided by charge time and see if Teslas and all wheel drive vehicles have are more or less efficient than their counterparts when we factor in their charge times to their ranges off of a charge. Other future work that could be done could be further research into cost implications of Teslas vs. other models, as well as charge times as previously mentioned.
